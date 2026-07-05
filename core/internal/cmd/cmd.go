@@ -82,14 +82,6 @@ func configuredWebBasePath() string {
 	return ""
 }
 
-func webBaseRoot(basePath string) string {
-	if basePath == "" {
-		return "/"
-	}
-
-	return basePath + "/"
-}
-
 func stripWebBasePathMiddleware(basePath string) ghttp.HandlerFunc {
 	return func(r *ghttp.Request) {
 		if basePath != "" {
@@ -134,13 +126,6 @@ var (
 			if err != nil {
 				g.Log().Error(ctx, "initialize redis failed ", err)
 				return err
-			}
-
-			// get safe path
-			safepath, _ := public.DockerEnv("SafePath")
-
-			if safepath != "" {
-				safepath = strings.TrimPrefix(safepath, "/")
 			}
 
 			// Start timers
@@ -201,79 +186,6 @@ var (
 
 			// ip whitelist middleware
 			s.Use(middleware.IPWhitelist)
-
-			// Define excluded URIs
-			excludesURIs := map[string]struct{}{
-				"/favicon.ico":                   {},
-				"/robots.txt":                    {},
-				"/unsubscribe.html":              {},
-				"/unsubscribe_new.html":          {},
-				"/api/aapanel/sso":               {},
-				"/api/unsubscribe/user_group":    {},
-				"/api/unsubscribe":               {},
-				"/api/unsubscribe_new":           {},
-				"/api/batch_mail/api/send":       {},
-				"/api/batch_mail/api/batch_send": {},
-				"/api/subscribe/confirm":         {},
-				"/api/subscribe/submit":          {},
-				"/api/languages/get":             {},
-				"/already_subscribed.html":       {},
-				"/subscribe_confirm.html":        {},
-				"/subscribe_form.html":           {},
-				"/subscribe_success.html":        {},
-				"/unsubscribe_success.html":      {},
-				"/subscribe_form_code.html":      {},
-			}
-
-			// Bind Server Hooks
-			s.BindHookHandlerByMap("/*", map[ghttp.HookName]ghttp.HandlerFunc{
-				ghttp.HookBeforeServe: func(r *ghttp.Request) {
-					// Safe path check
-					if safepath != "" {
-						if r.URL.Path == "/"+safepath {
-							// Set session
-							err := r.Session.Set("safe_path_pass", true)
-
-							if err != nil {
-								g.Log().Error(ctx, "set safe_path_pass failed ", err)
-							}
-
-							// r.Response.RedirectTo("/")
-							r.SetCtxVar("JustVisitedSafePath", true)
-							return
-						}
-
-						// check if the request is in the excluded URIs
-						if _, ok := excludesURIs[r.URL.Path]; ok {
-							return
-						}
-
-						if r.IsFileRequest() {
-							return
-						}
-
-						if !r.Session.MustGet("safe_path_pass", false).Bool() {
-							if strings.HasPrefix(r.URL.Path, "/api/") {
-								// Check if the request is an API token request
-								if claims, err := rbac2.JWT().ParseTokenByRequest(r); err == nil && claims != nil && claims.ApiToken {
-									return
-								}
-								resp := public.CodeMap[404]
-								resp.Msg = "access denied"
-								r.Response.WriteJson(resp)
-							} else {
-								g.Log().Debug(ctx, "Safe path not passed ", r.URL.Path)
-								r.Response.WriteHeader(404)
-							}
-							r.ExitAll()
-							return
-						}
-					}
-				},
-				// ghttp.HookAfterServe: func(r *ghttp.Request) {},
-				// ghttp.HookBeforeOutput: func(r *ghttp.Request) {},
-				// ghttp.HookAfterOutput: func(r *ghttp.Request) {},
-			})
 
 			// Register Common Handlers
 			s.Group("/", func(group *ghttp.RouterGroup) {
@@ -435,16 +347,6 @@ var (
 			// Add static file handler
 			s.BindHandler("/*any", func(r *ghttp.Request) {
 				if strings.HasPrefix(r.URL.Path, "/api/") {
-					r.Response.WriteHeader(404)
-					return
-				}
-
-				if r.GetCtxVar("JustVisitedSafePath", false).Bool() {
-					r.Response.RedirectTo(webBaseRoot(webBasePath))
-					return
-				}
-
-				if safepath != "" && !r.Session.MustGet("safe_path_pass", false).Bool() {
 					r.Response.WriteHeader(404)
 					return
 				}
